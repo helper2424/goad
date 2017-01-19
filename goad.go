@@ -100,6 +100,8 @@ func (t *Test) Start() <-chan queue.RegionsAggData {
 func (t *Test) invokeLambdas(awsConfig *aws.Config, sqsURL string) {
 	lambdas := numberOfLambdas(t.config.Concurrency, len(t.config.Regions))
 
+	var idCounter uint = 0
+
 	for i := 0; i < lambdas; i++ {
 		region := t.config.Regions[i%len(t.config.Regions)]
 		requests, requestsRemainder := divide(t.config.TotalRequests, lambdas)
@@ -131,7 +133,11 @@ func (t *Test) invokeLambdas(awsConfig *aws.Config, sqsURL string) {
 			fmt.Sprintf("%s", c.Method),
 			"-b",
 			fmt.Sprintf("%s", c.Body),
+			"-i",
+			fmt.Sprintf("%s", strconv.Itoa(int(idCounter))),
 		}
+
+		idCounter += requests
 
 		for _, v := range t.config.Headers {
 			args = append(args, "-H", fmt.Sprintf("%s", v))
@@ -156,6 +162,8 @@ func (t *Test) invokeLambda(awsConfig *aws.Config, args invokeArgs) {
 		FunctionName: aws.String("goad:" + version.LambdaVersion()),
 		InvokeArgs:   bytes.NewReader(j),
 	})
+
+	fmt.Println(string(j), version.LambdaVersion())
 }
 
 func numberOfLambdas(concurrency uint, numRegions int) int {

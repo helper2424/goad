@@ -22,17 +22,18 @@ import (
 func main() {
 
 	var (
-		address          string
-		sqsurl           string
+		address string
+		sqsurl string
 		concurrencycount int
-		maxRequestCount  int
-		timeout          string
-		frequency        string
-		awsregion        string
-		queueRegion      string
-		requestMethod    string
-		requestBody      string
-		requestHeaders   helpers.StringsliceFlag
+		maxRequestCount int
+		timeout string
+		frequency string
+		awsregion string
+		queueRegion string
+		requestMethod string
+		requestBody string
+		requestHeaders helpers.StringsliceFlag
+		startId int
 	)
 
 	flag.StringVar(&address, "u", "", "URL to load test (required)")
@@ -46,6 +47,7 @@ func main() {
 
 	flag.IntVar(&concurrencycount, "c", 10, "number of concurrent requests")
 	flag.IntVar(&maxRequestCount, "n", 1000, "number of total requests to make")
+	flag.IntVar(&startId, "i", -1, "start identifier of requests, i + current_request_id == request id")
 
 	flag.Var(&requestHeaders, "H", "List of headers")
 	flag.Parse()
@@ -63,7 +65,7 @@ func main() {
 	client.Timeout = clientTimeout
 
 	fmt.Printf("Will spawn %d workers making %d requests to %s\n", concurrencycount, maxRequestCount, address)
-	runLoadTest(client, sqsurl, address, maxRequestCount, concurrencycount, awsregion, reportingFrequency, queueRegion, requestMethod, requestBody, requestHeaders)
+	runLoadTest(client, sqsurl, address, maxRequestCount, concurrencycount, awsregion, reportingFrequency, queueRegion, requestMethod, requestBody, requestHeaders, startId)
 }
 
 type RequestResult struct {
@@ -80,17 +82,23 @@ type RequestResult struct {
 	State            string `json:"state"`
 }
 
-func runLoadTest(client *http.Client, sqsurl string, url string, totalRequests int, concurrencycount int, awsregion string, reportingFrequency time.Duration, queueRegion string, requestMethod string, requestBody string, requestHeaders []string) {
+type Job struct {
+	id int
+}
+
+func runLoadTest(client *http.Client, sqsurl string, url string, totalRequests int,
+		concurrencycount int, awsregion string, reportingFrequency time.Duration, queueRegion string,
+		requestMethod string, requestBody string, requestHeaders []string, startId int) {
 	awsConfig := aws.NewConfig().WithRegion(queueRegion)
 	sqsAdaptor := queue.NewSQSAdaptor(awsConfig, sqsurl)
 	//sqsAdaptor := queue.NewDummyAdaptor(sqsurl)
-	jobs := make(chan struct{}, totalRequests)
+	jobs := make(chan Job, totalRequests)
 	ch := make(chan RequestResult, totalRequests)
 	var wg sync.WaitGroup
 	loadTestStartTime := time.Now()
 	var requestsSoFar int
 	for i := 0; i < totalRequests; i++ {
-		jobs <- struct{}{}
+		jobs <- Job{i + startId}
 	}
 	close(jobs)
 	fmt.Print("Spawning workers…")
@@ -126,8 +134,8 @@ func runLoadTest(client *http.Client, sqsurl string, url string, totalRequests i
 			case r := <-ch:
 				i++
 				requestsSoFar++
-				if requestsSoFar%10 == 0 || requestsSoFar == totalRequests {
-					fmt.Printf("\r%.2f%% done (%d requests out of %d)", (float64(requestsSoFar)/float64(totalRequests))*100.0, requestsSoFar, totalRequests)
+				if requestsSoFar % 10 == 0 || requestsSoFar == totalRequests {
+					fmt.Printf("\r%.2f%% done (%d requests out of %d)", (float64(requestsSoFar) / float64(totalRequests)) * 100.0, requestsSoFar, totalRequests)
 				}
 				if firstRequestTime == 0 {
 					firstRequestTime = r.Time
@@ -191,7 +199,7 @@ func runLoadTest(client *http.Client, sqsurl string, url string, totalRequests i
 				}
 
 				fatalError := ""
-				if (totalTimedOut + totalConnectionError) > i/2 {
+				if (totalTimedOut + totalConnectionError) > i / 2 {
 					fatalError = "Over 50% of requests failed, aborting"
 					quitting = true
 				}
@@ -219,9 +227,10 @@ func runLoadTest(client *http.Client, sqsurl string, url string, totalRequests i
 
 }
 
-func fetch(loadTestStartTime time.Time, client *http.Client, address string, requestcount int, jobs <-chan struct{}, ch chan RequestResult, wg *sync.WaitGroup, awsregion string, requestMethod string, requestBody string, requestHeaders []string) {
+func fetch(loadTestStartTime time.Time, client *http.Client, address string, requestcount int, jobs <-chan Job, ch chan RequestResult, wg *sync.WaitGroup, awsregion string, requestMethod string, requestBody string, requestHeaders []string) {
 	defer wg.Done()
-	for _ = range jobs {
+	for job := range jobs {
+		fmt.Println(job.id)
 		start := time.Now()
 		req, err := http.NewRequest(requestMethod, address, bytes.NewBufferString(requestBody))
 		if err != nil {
