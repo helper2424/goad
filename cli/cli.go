@@ -80,7 +80,8 @@ func main() {
 	}
 
 	var finalResult queue.RegionsAggData
-	defer printSummary(&finalResult)
+	startTime := time.Now()
+	defer printSummary(&finalResult, startTime)
 
 	if outputFile != "" {
 		defer saveJSONSummary(outputFile, &finalResult)
@@ -254,7 +255,8 @@ func printData(data *queue.AggData) {
 	fmt.Println("")
 }
 
-func printSummary(result *queue.RegionsAggData) {
+func printSummary(result *queue.RegionsAggData, startTime time.Time) {
+	elapsedTime := time.Since(startTime)
 	if len(result.Regions) == 0 {
 		boldPrintln("No results received")
 		return
@@ -278,6 +280,8 @@ func printSummary(result *queue.RegionsAggData) {
 	for statusStr, value := range overall.Statuses {
 		fmt.Printf("%10s %10d\n", statusStr, value)
 	}
+	fmt.Println("")
+	boldPrintln(fmt.Sprintf("Elapsed time %s", elapsedTime))
 	fmt.Println("")
 }
 
